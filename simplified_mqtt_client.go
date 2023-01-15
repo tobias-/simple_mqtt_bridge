@@ -12,20 +12,7 @@ import (
 	"time"
 )
 
-func ParseMqttArgs(mqttUrl string, name string) (mqttOptions *mqtt.ClientOptions, err error) {
-	var connectHandler mqtt.OnConnectHandler = func(client mqtt.Client) {
-		log.Infof("Connected to %s mqtt server", name)
-	}
-
-	var connectLostHandler mqtt.ConnectionLostHandler = func(client mqtt.Client, err error) {
-		log.Warningf("Connect lost to %s mqtt server: %v", name, err)
-	}
-
-	var connectAttemptHandler mqtt.ConnectionAttemptHandler = func(broker *url.URL, tlsCfg *tls.Config) *tls.Config {
-		log.Debugf("Connecting to %s mqtt server: %s", name, broker)
-		return tlsCfg
-	}
-
+func parseUrl(mqttUrl string, name string) (parsedUrl string, username string, password string, err error) {
 	parsedMqttUrl, err := url.Parse(mqttUrl)
 	if err != nil {
 		return
@@ -51,7 +38,6 @@ func ParseMqttArgs(mqttUrl string, name string) (mqttOptions *mqtt.ClientOptions
 		}
 	}
 	virtualHost := strings.Trim(parsedMqttUrl.Path, "/")
-	var username string
 	if len(virtualHost) != 0 {
 		username = parsedMqttUrl.User.Username() + ":" + virtualHost
 	} else {
@@ -63,15 +49,37 @@ func ParseMqttArgs(mqttUrl string, name string) (mqttOptions *mqtt.ClientOptions
 		err = errors.New(name + ": invalid username/password. Only exactly one colon is allowed")
 		return
 	}
-	host := parsedMqttUrl.Host
+	host := parsedMqttUrl.Hostname()
 	if len(host) == 0 {
 		err = errors.New(name + ": invalid mqtt-url")
 		return
 	}
+	parsedUrl = fmt.Sprintf("%s://%s:%d", protocol, host, port)
+	return
+}
+
+func ParseMqttArgs(mqttUrl string, name string) (mqttOptions *mqtt.ClientOptions, err error) {
+	var connectHandler mqtt.OnConnectHandler = func(client mqtt.Client) {
+		log.Infof("Connected to %s mqtt server", name)
+	}
+
+	var connectLostHandler mqtt.ConnectionLostHandler = func(client mqtt.Client, err error) {
+		log.Warningf("Connect lost to %s mqtt server: %v", name, err)
+	}
+
+	var connectAttemptHandler mqtt.ConnectionAttemptHandler = func(broker *url.URL, tlsCfg *tls.Config) *tls.Config {
+		log.Debugf("Connecting to %s mqtt server: %s", name, broker)
+		return tlsCfg
+	}
+
+	parsedUrl, username, password, err := parseUrl(mqttUrl, name)
+
 	mqttOptions = mqtt.NewClientOptions()
-	mqttOptions.AddBroker(fmt.Sprintf("%s://%s:%d", protocol, host, port))
-	if len(username) != 0 && len(password) != 0 {
+	mqttOptions.AddBroker(parsedUrl)
+	if len(username) != 0 {
 		mqttOptions.SetUsername(username)
+	}
+	if len(password) != 0 {
 		mqttOptions.SetPassword(password)
 	}
 	mqttOptions.SetConnectTimeout(5 * time.Second)
